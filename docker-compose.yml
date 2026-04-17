@@ -1,0 +1,74 @@
+# ============================================
+# 🐳 Full-Stack Docker Compose
+# ============================================
+# 3 Service: React (frontend) + Node (API) + PostgreSQL (database)
+#
+# Perintah:
+#   docker-compose up -d --build    → Nyalakan semua
+#   docker-compose down             → Matikan semua
+#   docker-compose logs -f          → Lihat logs semua service
+#   docker-compose ps               → Cek status
+
+services:
+
+  jenkins:
+    image: jenkins/jenkins:lts
+    extra_hosts:
+      - "github.com:140.82.114.4"
+    container_name: jenkins_server
+    user: root # Menggunakan root sementara untuk mempermudah permission volume
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    ports:
+      - "8080:8080"   # Port Utama untuk web UI Jenkins
+      - "50000:50000" # Port komunikasi antara Controller dan Agent
+    volumes:
+      - jenkins_home:/var/jenkins_home  # Mount agar data/plugins tidak hilang saat container mati
+    restart: on-failure
+
+  db:
+    image: postgres:15
+    container_name: postgres_db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  backend:
+    build: 
+      context: ./backend
+    container_name: express_api
+    ports:
+      - "3011:3011"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - PORT=${BACKEND_PORT}
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+    depends_on:
+      - db
+
+  frontend:
+    build: ./frontend
+    container_name: nextjs_web
+    ports:
+      - "3010:3010"
+    environment:
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+    # --- TAMBAHKAN VOLUMES ---
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+
+
+volumes:
+  pgdata:
+  jenkins_home:
