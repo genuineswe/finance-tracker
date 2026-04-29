@@ -267,6 +267,81 @@ app.get('/api/transactions/:id', asyncHandler(async (req, res) => {
     });
 }));
 
+// ============================================================================
+// 50/30/20 BUDGET ALLOCATION ENDPOINT
+// ============================================================================
+
+// Zod Schema untuk budget input
+const budgetSchema = z.object({
+    income: z.number({ required_error: "Income is required" })
+        .positive("Income must be positive")
+});
+
+// POST /api/budget/allocate — Hitung alokasi 50/30/20
+app.post('/api/budget/allocate', asyncHandler(async (req, res) => {
+    // 1. Validate input
+    const validation = budgetSchema.safeParse(req.body);
+    if (!validation.success) {
+        throw new ValidationError('Validation Failed', validation.error.errors.map(e => ({
+            field: e.path.join('.'),
+            message: e.message
+        })));
+    }
+
+    const { income } = validation.data;
+
+    // 2. Hitung alokasi 50/30/20
+    const allocation = {
+        needs: {
+            percentage: 50,
+            amount: income * 0.50,
+            label: 'Kebutuhan (Needs)',
+            description: 'Sewa/KPR, listrik, air, makan, transportasi, asuransi'
+        },
+        wants: {
+            percentage: 30,
+            amount: income * 0.30,
+            label: 'Keinginan (Wants)',
+            description: 'Hiburan, langganan streaming, makan di luar, hobi'
+        },
+        savings: {
+            percentage: 20,
+            amount: income * 0.20,
+            label: 'Tabungan & Investasi (Savings)',
+            description: 'Dana darurat, investasi, bayar utang, dana pensiun'
+        }
+    };
+
+    // 3. Format ke Rupiah
+    const formatIDR = (amount) =>
+        new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(amount);
+
+    res.status(200).json({
+        status: 'success',
+        message: 'Budget allocation calculated (50/30/20 rule)',
+        data: {
+            income: {
+                raw: income,
+                formatted: formatIDR(income)
+            },
+            allocation: {
+                needs: {
+                    ...allocation.needs,
+                    formatted: formatIDR(allocation.needs.amount)
+                },
+                wants: {
+                    ...allocation.wants,
+                    formatted: formatIDR(allocation.wants.amount)
+                },
+                savings: {
+                    ...allocation.savings,
+                    formatted: formatIDR(allocation.savings.amount)
+                }
+            }
+        }
+    });
+}));
+
 // PUT /api/transactions/:id — Full Update
 app.put('/api/transactions/:id', asyncHandler(async (req, res) => {
     const { id } = req.params;
