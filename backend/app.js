@@ -7,6 +7,9 @@
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
+const xss = require('xss-clean');
+const cookieParser = require('cookie-parser');
+const crypto = require('crypto');
 const { z } = require('zod');
 const {
     asyncHandler,
@@ -26,6 +29,47 @@ app.use(cors({
     credentials: true // Wajib jika API Anda menggunakan cookies/session
 }));
 app.use(express.json());       // Parse JSON request body
+app.use(cookieParser());       // Parse Cookie header
+app.use(xss());                // Sanitize user input untuk cegah XSS
+
+// ─── CSRF Protection ───
+// GET endpoint untuk mendapatkan CSRF token
+app.get('/api/csrf-token', (req, res) => {
+    // Generate token baru atau gunakan yang sudah ada di cookie
+    const csrfToken = req.cookies['XSRF-TOKEN'] || crypto.randomUUID();
+    
+    res.cookie('XSRF-TOKEN', csrfToken, {
+        httpOnly: false, // Wajib false agar frontend JS bisa baca via document.cookie
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+    });
+    
+    res.json({ status: 'success', csrfToken });
+});
+
+// Middleware CSRF (Double Submit Cookie Pattern)
+const csrfMiddleware = (req, res, next) => {
+    // Skip proteksi untuk request yang tidak merubah state (aman)
+    if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+        return next();
+    }
+
+    const cookieToken = req.cookies['XSRF-TOKEN'];
+    // Axios & Fetch sering otomatis mengirim header dengan nama huruf kecil (x-xsrf-token)
+    const headerToken = req.headers['x-xsrf-token'] || req.headers['x-csrf-token'];
+
+    if (!cookieToken || !headerToken || cookieToken !== headerToken) {
+        return res.status(403).json({
+            status: 'error',
+            message: 'Forbidden: Invalid or missing CSRF token'
+        });
+    }
+
+    next();
+};
+
+// Pasang middleware ke aplikasi
+app.use(csrfMiddleware);
 
 // ─── Database Connection ───
 // Koneksi ke PostgreSQL menggunakan environment variables dari docker-compose.yml
