@@ -1,0 +1,201 @@
+# =============================================================================
+# 🚀 Production Docker Compose Override
+# =============================================================================
+# Penggunaan:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# File ini OVERRIDE docker-compose.yml untuk production:
+#   ✅ Resource limits (memory + CPU)
+#   ✅ Logging configuration (json-file driver, rotasi otomatis)
+#   ✅ Health checks (auto-restart jika service mati)
+#   ✅ Security hardening (non-root user, read-only filesystem)
+#   ✅ Production CMD (npm start, bukan npm run dev)
+#
+# PENTING: Jangan simpan secrets di file ini!
+#   → Gunakan .env file atau Docker Secrets / AWS SSM Parameter Store
+# =============================================================================
+
+services:
+  # ─── Nginx Reverse Proxy ───────────────────────────────────────────────────
+  nginx:
+    # Resource Limits
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 128M
+        reservations:
+          cpus: "0.10"
+          memory: 32M
+
+    # Logging: JSON driver dengan rotasi otomatis
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"    # Maks 10MB per file log
+        max-file: "3"      # Simpan 3 file log (rotasi)
+        tag: "{{.Name}}"   # Tag dengan nama container
+
+    # Health Check
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:80/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    # Security: Read-only root filesystem
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+      - /tmp
+
+    # Restart Policy
+    restart: unless-stopped
+
+  # ─── PostgreSQL Database ───────────────────────────────────────────────────
+  db:
+    # Resource Limits
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+
+    # Logging
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+        tag: "{{.Name}}"
+
+    # Health Check (pg_isready bawaan PostgreSQL)
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-admin} -d ${POSTGRES_DB:-db_transaksi}"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+    # Security: Jalankan sebagai postgres user (default di image official)
+    # JANGAN expose port ke host di production!
+    ports: !override []
+
+    # Restart Policy
+    restart: unless-stopped
+
+  # ─── Express Backend API ──────────────────────────────────────────────────
+  backend:
+    # Override: Gunakan production Dockerfile
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+
+    # Override environment untuk production
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - PORT=${BACKEND_PORT:-3011}
+      - NODE_ENV=production
+
+    # Resource Limits
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+
+    # Logging
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+        tag: "{{.Name}}"
+
+    # Health Check
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:${BACKEND_PORT:-3011}/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    # Depend on healthy db, not just started
+    depends_on:
+      db:
+        condition: service_healthy
+
+    # Security: Read-only filesystem
+    read_only: true
+    tmpfs:
+      - /tmp
+
+    # Restart Policy
+    restart: unless-stopped
+
+  # ─── Next.js Frontend ─────────────────────────────────────────────────────
+  frontend:
+    # Override: Gunakan production Dockerfile (multi-stage build)
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+
+    # Override environment
+    environment:
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+      - NODE_ENV=production
+
+    # Resource Limits
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+
+    # Logging
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+        tag: "{{.Name}}"
+
+    # Health Check
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3010/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+    # Depend on healthy backend
+    depends_on:
+      backend:
+        condition: service_healthy
+
+    # Security: Read-only filesystem
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/.next/cache
+
+    # Restart Policy
+    restart: unless-stopped
+
+  # ─── Jenkins: TIDAK dijalankan di production ───────────────────────────────
+  # Jenkins hanya untuk CI/CD server terpisah, bukan di production stack
+  jenkins:
+    profiles:
+      - ci  # Hanya jalan jika: docker compose --profile ci up jenkins
+
