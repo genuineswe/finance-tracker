@@ -1,7 +1,7 @@
 # ============================================
 # 🐳 Full-Stack Docker Compose
 # ============================================
-# 4 Service: Nginx (Proxy) + React (frontend) + Node (API) + PostgreSQL (database)
+# 5 Service: Nginx (Proxy) + React (frontend) + Node (API) + PostgreSQL (database) + Redis (cache)
 #
 # Perintah:
 #   docker-compose up -d --build    → Nyalakan semua
@@ -61,6 +61,8 @@ services:
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - PORT=${BACKEND_PORT}
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=${JWT_SECRET:-dev-secret-change-in-production}
     # Port mapping dihilangkan karena akses akan dilewati Nginx
     # Hindari mapping code di production (volumes dicomment)
     # volumes:
@@ -68,6 +70,7 @@ services:
     #   - /app/node_modules
     depends_on:
       - db
+      - redis
     networks:
       - web_network
       - db_network
@@ -89,6 +92,21 @@ services:
       - web_network
     restart: unless-stopped
 
+  # ─── Redis (Rate Limiting & Account Lockout) ───
+  redis:
+    image: redis:7-alpine
+    container_name: redis_cache
+    # Port mapping dihilangkan agar Redis tidak bisa diakses dari host
+    # Uncomment baris di bawah untuk debugging:
+    # ports:
+    #   - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 64mb --maxmemory-policy allkeys-lru
+    networks:
+      - db_network
+    restart: unless-stopped
+
 networks:
   web_network:
     driver: bridge
@@ -98,3 +116,4 @@ networks:
 volumes:
   pgdata:
   jenkins_home:
+  redis_data:

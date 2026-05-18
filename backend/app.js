@@ -17,6 +17,9 @@ const {
     ValidationError,
 } = require('./utils/errors');
 const { logError } = require('./utils/logger');
+const { connectRedis } = require('./utils/redis');
+const { generalLimiter, authLimiter } = require('./middleware/rateLimiter');
+const authRoutes = require('./routes/auth');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -31,6 +34,10 @@ app.use(cors({
 app.use(express.json());       // Parse JSON request body
 app.use(cookieParser());       // Parse Cookie header
 app.use(xss());                // Sanitize user input untuk cegah XSS
+
+// ─── Rate Limiting (Redis-backed) ───
+// Apply ke semua /api routes: 100 requests per 15 menit per IP
+app.use('/api', generalLimiter);
 
 // ─── CSRF Protection ───
 // GET endpoint untuk mendapatkan CSRF token
@@ -77,6 +84,9 @@ const pool = new Pool({
     connectionString: process.env.DATABASE_URL || `postgresql://${process.env.DB_USER}:${process.env.DB_PASSWORD}@${process.env.DB_HOST}:${process.env.DB_PORT}/${process.env.DB_NAME}`,
 });
 
+// Share pool via app.locals agar bisa diakses di route modules (auth.js)
+app.locals.pool = pool;
+
 // ─── Initialize Database ───
 // Buat tabel 'users' kalau belum ada (auto-migration sederhana)
 // ─── Initialize Database ─── (Update di backend/app.js)
@@ -103,7 +113,19 @@ async function initDB() {
           )
         `);
 
-        // 3. Masukkan kategori default jika kosong
+        // 3. Buat Tabel Users (untuk auth)
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY,
+            name VARCHAR(100) NOT NULL,
+            email VARCHAR(255) UNIQUE NOT NULL,
+            password_hash VARCHAR(60) NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          )
+        `);
+
+        // 4. Masukkan kategori default jika kosong
         const { rows } = await pool.query('SELECT COUNT(*) FROM categories');
         if (parseInt(rows[0].count) === 0) {
             await pool.query(`
@@ -113,7 +135,7 @@ async function initDB() {
             console.log('📦 Default categories inserted');
         }
 
-        console.log('✅ Database initialized: Tables transactions & categories created.');
+        console.log('✅ Database initialized: Tables transactions, categories & users created.');
     } catch (err) {
         console.error('❌ Database initialization failed:', err.message);
         setTimeout(initDB, 3000); // Retry jika gagal
@@ -122,6 +144,9 @@ async function initDB() {
 
 
 // ─── API Routes ───
+
+// Auth Routes (dengan rate limiter khusus yang lebih ketat)
+app.use('/api/auth', authLimiter, authRoutes);
 
 // Health check — untuk cek apakah API hidup
 app.get('/api/health', async (req, res) => {
@@ -475,7 +500,16 @@ app.use((err, req, res, next) => {
     });
 });
 
-app.listen(PORT, () => {
-    console.log(`Server is running on http://localhost:${PORT}`);
-    initDB();
-});
+// ─── Start Server ───
+async function startServer() {
+    // 1. Connect Redis (non-blocking: app tetap jalan walau Redis gagal)
+    await connectRedis();
+
+    // 2. Start Express
+    app.listen(PORT, () => {
+        console.log(`Server is running on http://localhost:${PORT}`);
+        initDB();
+    });
+}
+
+startServer();
