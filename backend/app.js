@@ -512,4 +512,11 @@ async function startServer() {
     });
 }
 
-startServer();
+// Hanya jalankan server jika file dijalankan secara langsung (bukan dari testing)
+if (require.main === module) {
+    startServer();
+}
+
+// Export 'app' agar bisa dibaca dan dites oleh Supertest
+module.exports = app;
+
