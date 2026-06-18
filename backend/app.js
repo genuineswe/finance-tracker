@@ -184,7 +184,7 @@ app.post('/api/transactions', asyncHandler(async (req, res) => {
     // Validate Body
     const validation = transactionSchema.safeParse(req.body);
     if (!validation.success) {
-        throw new ValidationError('Validation Failed', validation.error.errors.map(e => ({
+        throw new ValidationError('Validation Failed', validation.error.issues.map(e => ({
             field: e.path.join('.'),
             message: e.message
         })));
@@ -351,7 +351,7 @@ app.post('/api/budget/allocate', asyncHandler(async (req, res) => {
     // 1. Validate input
     const validation = budgetSchema.safeParse(req.body);
     if (!validation.success) {
-        throw new ValidationError('Validation Failed', validation.error.errors.map(e => ({
+        throw new ValidationError('Validation Failed', validation.error.issues.map(e => ({
             field: e.path.join('.'),
             message: e.message
         })));
@@ -418,7 +418,7 @@ app.put('/api/transactions/:id', asyncHandler(async (req, res) => {
 
     const validation = transactionSchema.safeParse(req.body);
     if (!validation.success) {
-        throw new ValidationError('Validation Failed', validation.error.errors.map(e => ({
+        throw new ValidationError('Validation Failed', validation.error.issues.map(e => ({
             field: e.path.join('.'),
             message: e.message
         })));
